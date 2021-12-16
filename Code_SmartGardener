@@ -1,0 +1,98 @@
+#include <M5Core2.h>
+#include <WiFi.h>
+#include <WiFiClient.h>
+#include <WiFiAP.h>
+
+#define moisturePin G36
+
+const char *ssid = "Moisture Meter";
+const char *password = "hello123";
+
+const int radius = 60;
+const int dispWidth = 320;
+const int dispHeight = 240;
+
+String startHTML = "<!DOCTYPE html><html lang=\"en\"> <head> <meta charset=\"UTF-8\"/> <meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge\"/> <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"/> <title>Moisture Meter</title> <style>*{box-sizing: border-box;}body{background-color: #e8f4f8; min-height: 100vh; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: row; align-items: center; justify-content: center;}button{padding: 10px 30px 10px 30px; min-width: 130px; color: black; border: solid 2px #ff0000; border-radius: 20px; outline: none; cursor: pointer; font-weight: 700; font-size: 16px; vertical-align: middle; background: #f5fdff; -moz-transition: all 0.2s ease-in-out; -webkit-transition: all 0.2s ease-in-out; -o-transition: all 0.2s ease-in-out; -ms-transition: all 0.2s ease-in-out; transition: all 0.2s ease-in-out;}button:hover{background: #e6f0f3;}</style> </head> <body> <div class=\"content\"> <a href=\"/moisture\"><button>Start</button></a> </div></body></html>";
+String moistureHTML = "<!DOCTYPE html><html lang=\"en\"> <head> <meta charset=\"UTF-8\"/> <meta http-equiv=\"refresh\" content=\"2\"/> <meta http-equiv=\"X-UA-Compatible\" content=\"IE=edge\"/> <meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0\"/> <title>Moisture Meter</title> <style>*{box-sizing: border-box;}body{background-color: #e8f4f8; min-height: 100vh; font-family: Arial, Helvetica, sans-serif; display: flex; flex-direction: row; align-items: center; justify-content: center;}button{padding: 10px 30px 10px 30px; min-width: 130px; color: black; border: solid 2px #ff0000; border-radius: 20px; outline: none; cursor: pointer; font-weight: 700; font-size: 16px; vertical-align: middle; background: #f5fdff; -moz-transition: all 0.2s ease-in-out; -webkit-transition: all 0.2s ease-in-out; -o-transition: all 0.2s ease-in-out; -ms-transition: all 0.2s ease-in-out; transition: all 0.2s ease-in-out;}button:hover{background: #e6f0f3;}</style> </head> <body> <div class=\"content\"> <h1>Moisture</h1> <font size=\"4\">%%moisture_value%%</font> </div></body></html>";
+
+WiFiServer server(80);
+int tm = millis();
+
+void graphics(){
+  M5.Lcd.fillScreen(BLACK);
+  M5.Lcd.setTextSize(2);
+  M5.Lcd.setCursor(dispWidth / 2 - 80, 20);
+  M5.Lcd.print("Moisture Level");
+  
+  M5.Lcd.drawCircle(dispWidth / 2, dispHeight / 2, radius, WHITE);
+}
+
+void setup() {
+  pinMode(moisturePin, INPUT);
+  M5.begin();
+
+  graphics();
+
+  WiFi.softAP(ssid, password);
+  IPAddress myIP = WiFi.softAPIP();
+  Serial.print(myIP);
+  
+  randomSeed(analogRead(0));
+  server.begin();
+}
+
+void loop() {
+  int value;
+  int delayed = millis() - tm;
+  
+  if(delayed > 300){
+    value = map(constrain(analogRead(moisturePin), 1500, 4095), 4095, 1500, 0, 99);
+    tm = millis();
+  }
+
+  M5.Lcd.setTextSize(4);
+  M5.Lcd.setCursor(dispWidth / 2 - 35, dispHeight / 2 - 12);
+  
+  M5.Lcd.print((value < 10 ? "0": "") + String(value) + "%");
+  
+  WiFiClient client = server.available();
+
+  if (client) {
+    String currentLine = "";
+    while (client.connected()) {
+      if (client.available()) {
+        char c = client.read();
+        Serial.write(c);
+        if (c == '\n') {
+          
+          if (currentLine.length() == 0) {
+            client.println("HTTP/1.1 200 OK");
+            client.println("Content-type:text/html");
+            client.println();
+            
+            client.print(startHTML);
+            client.println();
+            break;
+          } else {
+            currentLine = "";
+          }
+        } else if (c != '\r') {
+          currentLine += c;
+        }
+
+        if (currentLine.endsWith("GET /moisture")) {
+            client.println("HTTP/1.1 200 OK");
+            client.println("Content-type:text/html");
+            client.println();
+
+            moistureHTML.replace("%%moisture_value%%", (value < 10 ? "0": "") + String(value) + "%");
+            client.print(moistureHTML);
+            client.println();
+            break;
+        }
+      }
+    }
+    client.stop();
+  }
+  M5.update();
+}
